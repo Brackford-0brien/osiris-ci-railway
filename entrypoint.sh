@@ -7,23 +7,60 @@ echo "=== Osiris CI - Démarrage ==="
 APP_PORT="${PORT:-80}"
 echo "Port d'écoute : ${APP_PORT}"
 
-# Patcher ports.conf : remplace toute ligne "Listen <n>" par le bon port
+# Patcher ports.conf
 if [ -f /etc/apache2/ports.conf ]; then
     sed -i "s/^Listen [0-9]*/Listen ${APP_PORT}/" /etc/apache2/ports.conf
     echo "ports.conf patché ✓"
 fi
 
-# Patcher les VirtualHost *:80 → *:$APP_PORT dans tous les sites activés
+# ── DocumentRoot → /public (requis GLPI 10+) ────────────────────────────────
+# Remplace DocumentRoot et Directory pour pointer vers /public
 for conf in /etc/apache2/sites-enabled/*.conf /etc/apache2/sites-enabled/*; do
     [ -f "$conf" ] || continue
+    # Port
     sed -i "s/<VirtualHost \*:80>/<VirtualHost *:${APP_PORT}>/" "$conf"
+    # DocumentRoot
+    sed -i "s|DocumentRoot /var/www/html/glpi$|DocumentRoot /var/www/html/glpi/public|g" "$conf"
+    sed -i "s|DocumentRoot /var/www/html/glpi/\b|DocumentRoot /var/www/html/glpi/public|g" "$conf"
+    # Directory block
+    sed -i "s|<Directory /var/www/html/glpi>|<Directory /var/www/html/glpi/public>|g" "$conf"
+    sed -i "s|<Directory /var/www/html/glpi/>|<Directory /var/www/html/glpi/public/>|g" "$conf"
 done
-echo "VirtualHost patché ✓"
+
+# Si aucun vhost n'existe ou DocumentRoot pas patché, écrire un vhost complet
+VHOST_FILE="/etc/apache2/sites-enabled/glpi.conf"
+if [ ! -f "$VHOST_FILE" ] || ! grep -q "/glpi/public" "$VHOST_FILE" 2>/dev/null; then
+    cat > "$VHOST_FILE" << VHOST
+<VirtualHost *:${APP_PORT}>
+    DocumentRoot /var/www/html/glpi/public
+
+    <Directory /var/www/html/glpi/public>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+
+        RewriteEngine On
+        RewriteCond %{REQUEST_FILENAME} !-f
+        RewriteRule ^(.*)$ index.php [QSA,L]
+    </Directory>
+
+    ErrorLog \${APACHE_LOG_DIR}/glpi_error.log
+    CustomLog \${APACHE_LOG_DIR}/glpi_access.log combined
+    LogLevel error
+</VirtualHost>
+VHOST
+    echo "VirtualHost /public écrit ✓"
+fi
+
+# Activer mod_rewrite
+a2enmod rewrite 2>/dev/null || true
+
+# Désactiver la page par défaut Apache
+a2dissite 000-default 2>/dev/null || true
+a2ensite glpi 2>/dev/null || true
 
 # Supprimer l'avertissement ServerName
-if ! grep -q "^ServerName" /etc/apache2/apache2.conf 2>/dev/null; then
-    echo "ServerName localhost" >> /etc/apache2/apache2.conf
-fi
+grep -q "^ServerName" /etc/apache2/apache2.conf 2>/dev/null || echo "ServerName localhost" >> /etc/apache2/apache2.conf
 
 # ── Config base de données depuis variables Railway MySQL ───────────────────
 mkdir -p /var/www/html/glpi/config
@@ -55,7 +92,7 @@ LOGO_DIR="/var/www/html/glpi/public/pics/logos"
 PHP_CFG="/var/www/html/glpi/src/autoload/CFG_GLPI.php"
 
 if [ -d "$LOGO_DIR" ]; then
-    cp /osiris/osiris_logo.png "$LOGO_DIR/osiris_logo.png" 2>/dev/null && echo "Logo Osiris copié ✓" || echo "Logo skip (répertoire non prêt)"
+    cp /osiris/osiris_logo.png "$LOGO_DIR/osiris_logo.png" 2>/dev/null && echo "Logo Osiris copié ✓" || echo "Logo skip"
     cp /osiris/osiris_logo_full.webp "$LOGO_DIR/osiris_logo_full.webp" 2>/dev/null || true
 fi
 
