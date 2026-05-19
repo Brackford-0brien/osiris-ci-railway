@@ -4,10 +4,10 @@ dockerfilePath = "Dockerfile"
 
 [deploy]
 startCommand = "/osiris-entrypoint.sh"
-healthcheckPath = "/"
+healthcheckPath = "/glpi/"
 healthcheckTimeout = 120
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
 
-[[deploy.volumeMounts]]
-mountPath = "/var/www/html/glpi"
+# Volume retiré : le montage sur /var/www/html/glpi masquait les fichiers GLPI de l'image
+# Les données persistantes sont dans Railway MySQL
