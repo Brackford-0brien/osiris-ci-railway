@@ -3,27 +3,24 @@ set -e
 
 echo "=== Osiris CI - Démarrage ==="
 
-# ── Port Railway ─────────────────────────────────────────────────────────────
 APP_PORT="${PORT:-80}"
-echo "Port : ${APP_PORT}"
+GLPI_DIR=/var/www/html/glpi
 
-# Patch uniquement notre vhost connu (figé au build)
-sed -i "s/<VirtualHost \*:80>/<VirtualHost *:${APP_PORT}>/" /etc/apache2/sites-available/glpi.conf
-sed -i "s/^Listen [0-9]*/Listen ${APP_PORT}/" /etc/apache2/ports.conf
-grep -q "^ServerName" /etc/apache2/apache2.conf || echo "ServerName localhost" >> /etc/apache2/apache2.conf
+# ── 1. PHP : timezone + cookie httponly ─────────────────────────────────────
+PHP_DIR=$(ls -d /etc/php/*/apache2 2>/dev/null | head -1)
+if [ -n "$PHP_DIR" ]; then
+    echo 'date.timezone = "Africa/Abidjan"' > "${PHP_DIR}/conf.d/timezone.ini"
+    sed -i 's,session.cookie_httponly = *\(on\|off\|true\|false\|0\|1\)\?,session.cookie_httponly = on,gi' "${PHP_DIR}/php.ini" 2>/dev/null || true
+fi
 
-echo "Apache → port ${APP_PORT}, DocumentRoot /var/www/html/glpi/public ✓"
+# ── 2. config_db.php depuis variables Railway MySQL ─────────────────────────
+mkdir -p "${GLPI_DIR}/config"
+DB_HOST="${MYSQLHOST:-localhost}"
+DB_USER="${MYSQLUSER:-root}"
+DB_PASS="${MYSQLPASSWORD:-}"
+DB_NAME="${MYSQLDATABASE:-railway}"
 
-# ── Config base de données ────────────────────────────────────────────────────
-mkdir -p /var/www/html/glpi/config
-
-DB_HOST="${MYSQLHOST:-${MYSQL_HOST:-localhost}}"
-DB_PORT="${MYSQLPORT:-${MYSQL_PORT:-3306}}"
-DB_USER="${MYSQLUSER:-${MYSQL_USER:-root}}"
-DB_PASS="${MYSQLPASSWORD:-${MYSQL_PASSWORD:-}}"
-DB_NAME="${MYSQLDATABASE:-${MYSQL_DATABASE:-railway}}"
-
-cat > /var/www/html/glpi/config/config_db.php << EOF
+cat > "${GLPI_DIR}/config/config_db.php" << EOF
 <?php
 class DB extends DBmysql {
    public \$dbhost = '${DB_HOST}';
@@ -36,16 +33,45 @@ class DB extends DBmysql {
    public \$allow_signed_keys = false;
 }
 EOF
+echo "config_db.php → ${DB_HOST}/${DB_NAME} ✓"
 
-echo "config_db.php → ${DB_HOST}:${DB_PORT}/${DB_NAME} ✓"
+# ── 3. Branding Osiris CI (GLPI existe : figé au build) ─────────────────────
+cp /osiris/osiris_logo.png       "${GLPI_DIR}/public/pics/logos/" 2>/dev/null && echo "Logo ✓" || true
+cp /osiris/osiris_logo_full.webp "${GLPI_DIR}/public/pics/logos/" 2>/dev/null || true
+cp /osiris/CFG_GLPI.php          "${GLPI_DIR}/src/autoload/CFG_GLPI.php" 2>/dev/null && echo "App name Osiris CI ✓" || true
+chown -R www-data:www-data "${GLPI_DIR}"
 
-# ── Branding Osiris CI ────────────────────────────────────────────────────────
-LOGO_DIR="/var/www/html/glpi/public/pics/logos"
-PHP_CFG="/var/www/html/glpi/src/autoload/CFG_GLPI.php"
+# ── 4. Apache : vhost /public sur le port Railway ───────────────────────────
+cat > /etc/apache2/sites-available/000-default.conf << EOF
+<VirtualHost *:${APP_PORT}>
+    DocumentRoot ${GLPI_DIR}/public
 
-[ -d "$LOGO_DIR" ] && cp /osiris/osiris_logo.png "$LOGO_DIR/" 2>/dev/null && echo "Logo ✓" || true
-[ -d "$LOGO_DIR" ] && cp /osiris/osiris_logo_full.webp "$LOGO_DIR/" 2>/dev/null || true
-[ -f "$PHP_CFG" ]  && cp /osiris/CFG_GLPI.php "$PHP_CFG" 2>/dev/null && echo "App name Osiris CI ✓" || true
+    <Directory ${GLPI_DIR}/public>
+        Require all granted
+        RewriteEngine On
+        RewriteCond %{REQUEST_FILENAME} !-f
+        RewriteRule ^(.*)\$ index.php [QSA,L]
+    </Directory>
 
-echo "=== Lancement Apache ==="
-exec /opt/glpi-start.sh
+    ErrorLog /var/log/apache2/error-glpi.log
+    CustomLog /var/log/apache2/access-glpi.log combined
+    LogLevel error
+</VirtualHost>
+EOF
+
+echo "Listen ${APP_PORT}" > /etc/apache2/ports.conf
+grep -q "^ServerName" /etc/apache2/apache2.conf || echo "ServerName localhost" >> /etc/apache2/apache2.conf
+
+a2enmod rewrite >/dev/null 2>&1 || true
+a2ensite 000-default >/dev/null 2>&1 || true
+
+echo "Apache → port ${APP_PORT}, DocumentRoot ${GLPI_DIR}/public ✓"
+
+# ── 5. Cron GLPI ────────────────────────────────────────────────────────────
+echo "*/2 * * * * www-data /usr/bin/php ${GLPI_DIR}/front/cron.php &>/dev/null" > /etc/cron.d/glpi
+service cron start >/dev/null 2>&1 || true
+
+# ── 6. Apache au premier plan ───────────────────────────────────────────────
+pkill -9 apache2 2>/dev/null || true
+echo "=== Lancement Apache (port ${APP_PORT}) ==="
+exec /usr/sbin/apache2ctl -D FOREGROUND
