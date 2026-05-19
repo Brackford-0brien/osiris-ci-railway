@@ -3,10 +3,31 @@ set -e
 
 echo "=== Osiris CI - Démarrage ==="
 
-# Écrire config_db.php depuis les variables Railway MySQL
+# ── Port Railway (défaut 80 si non défini) ──────────────────────────────────
+APP_PORT="${PORT:-80}"
+echo "Port d'écoute : ${APP_PORT}"
+
+# Patcher ports.conf : remplace toute ligne "Listen <n>" par le bon port
+if [ -f /etc/apache2/ports.conf ]; then
+    sed -i "s/^Listen [0-9]*/Listen ${APP_PORT}/" /etc/apache2/ports.conf
+    echo "ports.conf patché ✓"
+fi
+
+# Patcher les VirtualHost *:80 → *:$APP_PORT dans tous les sites activés
+for conf in /etc/apache2/sites-enabled/*.conf /etc/apache2/sites-enabled/*; do
+    [ -f "$conf" ] || continue
+    sed -i "s/<VirtualHost \*:80>/<VirtualHost *:${APP_PORT}>/" "$conf"
+done
+echo "VirtualHost patché ✓"
+
+# Supprimer l'avertissement ServerName
+if ! grep -q "^ServerName" /etc/apache2/apache2.conf 2>/dev/null; then
+    echo "ServerName localhost" >> /etc/apache2/apache2.conf
+fi
+
+# ── Config base de données depuis variables Railway MySQL ───────────────────
 mkdir -p /var/www/html/glpi/config
 
-# Railway fournit ces variables pour le plugin MySQL
 DB_HOST="${MYSQLHOST:-${MYSQL_HOST:-glpi-db}}"
 DB_PORT="${MYSQLPORT:-${MYSQL_PORT:-3306}}"
 DB_USER="${MYSQLUSER:-${MYSQL_USER:-glpi}}"
@@ -29,8 +50,7 @@ EOF
 
 echo "config_db.php écrit → ${DB_HOST}:${DB_PORT}/${DB_NAME}"
 
-# Appliquer les fichiers Osiris CI (à chaque démarrage)
-# pour s'assurer qu'ils sont toujours présents même après une réinitialisation
+# ── Branding Osiris CI ───────────────────────────────────────────────────────
 LOGO_DIR="/var/www/html/glpi/public/pics/logos"
 PHP_CFG="/var/www/html/glpi/src/autoload/CFG_GLPI.php"
 
@@ -43,5 +63,5 @@ if [ -f "$PHP_CFG" ]; then
     cp /osiris/CFG_GLPI.php "$PHP_CFG" 2>/dev/null && echo "App name Osiris CI ✓" || true
 fi
 
-echo "=== Lancement Apache ==="
+echo "=== Lancement Apache sur port ${APP_PORT} ==="
 exec /opt/glpi-start.sh
