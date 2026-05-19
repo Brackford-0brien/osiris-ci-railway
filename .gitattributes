@@ -1,0 +1,8 @@
+entrypoint.sh text eol=lf
+*.sh text eol=lf
+Dockerfile text eol=lf
+railway.toml text eol=lf
+*.php text eol=lf
+*.sql text eol=lf
+*.png binary
+*.webp binary
