@@ -9,6 +9,11 @@ RUN cd /var/www/html \
     && rm -f glpi-11.0.7.tgz \
     && chown -R www-data:www-data /var/www/html/glpi
 
+# Clés crypto GLPI (doivent correspondre au dump SQL importé)
+COPY build/glpicrypt.key /osiris/glpicrypt.key
+COPY build/oauth.pem     /osiris/oauth.pem
+COPY build/oauth.pub     /osiris/oauth.pub
+
 # Fichiers Osiris CI (branding + logo + app_name)
 COPY build/CFG_GLPI.php          /osiris/CFG_GLPI.php
 COPY build/osiris_logo.png       /osiris/osiris_logo.png

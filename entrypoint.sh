@@ -35,7 +35,14 @@ class DB extends DBmysql {
 EOF
 echo "config_db.php → ${DB_HOST}/${DB_NAME} ✓"
 
-# ── 3. Branding Osiris CI (GLPI existe : figé au build) ─────────────────────
+# ── 3. Clés crypto (identiques au dump SQL → validation tokens OK) ──────────
+cp /osiris/glpicrypt.key "${GLPI_DIR}/config/glpicrypt.key"
+cp /osiris/oauth.pem     "${GLPI_DIR}/config/oauth.pem"
+cp /osiris/oauth.pub     "${GLPI_DIR}/config/oauth.pub"
+chmod 640 "${GLPI_DIR}/config/glpicrypt.key" "${GLPI_DIR}/config/oauth.pem" "${GLPI_DIR}/config/oauth.pub"
+echo "Clés crypto copiées ✓"
+
+# ── 4. Branding ─────────────────────────────────────────────────────────────
 cp /osiris/osiris_logo.png       "${GLPI_DIR}/public/pics/logos/" 2>/dev/null && echo "Logo ✓" || true
 cp /osiris/osiris_logo_full.webp "${GLPI_DIR}/public/pics/logos/" 2>/dev/null || true
 cp /osiris/CFG_GLPI.php          "${GLPI_DIR}/src/autoload/CFG_GLPI.php" 2>/dev/null && echo "App name Osiris CI ✓" || true
